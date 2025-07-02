@@ -1,0 +1,9 @@
+uvicorn
+fastapi
+prometheus-client
+prometheus-fastapi-instrumentator
+torch
+numpy
+transformers
+cachetools
+psutil

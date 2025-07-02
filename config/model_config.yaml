@@ -1,0 +1,94 @@
+# MLOps DistillBERT Configuration
+
+# Model Configuration
+model:
+  name: "distilbert-base-uncased-finetuned-sst-2-english"
+  task: "sentiment-analysis"
+  cache_dir: "./models"
+  num_labels: 2
+
+# Serving Configuration
+serving:
+  max_length: 512
+  batch_size: 32
+  max_batch_size: 100
+
+# Cache Configuration
+cache:
+  enable: true
+  ttl: 3600  # 1 hour in seconds
+  maxsize: 1000
+
+# Training Configuration
+training:
+  epochs: 3
+  batch_size: 16
+  learning_rate: 2e-5
+  weight_decay: 0.01
+  warmup_steps: 500
+  max_length: 512
+  logging_steps: 10
+  eval_steps: 500
+  save_steps: 500
+
+# Validation Thresholds
+validation:
+  min_accuracy: 0.85
+  min_f1: 0.80
+  max_latency: 2.0  # seconds
+
+# Monitoring Configuration
+monitoring:
+  enable_metrics: true
+  enable_logging: true
+  log_sampling_rate: 1.0
+  metrics_port: 9090
+  performance_window_size: 100
+
+# A/B Testing Configuration
+ab_testing:
+  enabled: false
+  traffic_split:
+    v1.0.0: 100
+  control_version: "v1.0.0"
+  metrics:
+    - accuracy
+    - latency
+    - user_satisfaction
+
+# API Configuration
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  reload: false
+  log_level: "INFO"
+  enable_cors: true
+  cors_origins:
+    - "http://localhost:3000"
+    - "http://localhost:8080"
+
+# Security Configuration
+security:
+  enable_rate_limiting: false
+  rate_limit_per_minute: 100
+  enable_auth: false
+  api_key_header: "X-API-Key"
+
+# Feature Store Configuration
+feature_store:
+  enable: true
+  backend: "memory"  # memory, redis, or database
+  ttl: 7200  # 2 hours
+
+# MLflow Configuration
+mlflow:
+  tracking_uri: "http://localhost:5000"
+  experiment_name: "distillbert-sentiment"
+  artifact_location: "./mlruns"
+
+# Weights & Biases Configuration
+wandb:
+  project: "mlops-distillbert"
+  entity: null
+  enabled: false
