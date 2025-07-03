@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST, REGISTRY
 from prometheus_fastapi_instrumentator import Instrumentator
 
-from .models import (
+from src.api.models import (
     PredictionRequest,
     PredictionResponse,
     BatchPredictionRequest,
@@ -24,7 +24,7 @@ from .models import (
     ModelInfo,
     HealthResponse
 )
-from .utils import ModelManager, get_model_manager
+from src.api.utils import ModelManager, get_model_manager
 
 # Configure logging
 logging.basicConfig(

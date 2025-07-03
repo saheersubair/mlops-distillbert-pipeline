@@ -1,0 +1,473 @@
+name: MLOps CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Weekly model retraining
+    - cron: '0 2 * * 0'
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/mlops-distillbert
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # Code Quality and Testing
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov black flake8 mypy bandit safety
+
+    - name: Code formatting check
+      run: |
+        black --check --diff src/ tests/
+
+    - name: Lint with flake8
+      run: |
+        flake8 src/ tests/ --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 src/ tests/ --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
+    - name: Type checking with mypy
+      run: |
+        mypy src/ --ignore-missing-imports
+
+    - name: Security check with bandit
+      run: |
+        bandit -r src/ -f json -o bandit-report.json || true
+
+    - name: Safety check for vulnerabilities
+      run: |
+        safety check --json --output safety-report.json || true
+
+    - name: Run unit tests
+      run: |
+        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-reports-${{ matrix.python-version }}
+        path: |
+          htmlcov/
+          bandit-report.json
+          safety-report.json
+
+  # Model validation and testing
+  model-validation:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download test datasets
+      run: |
+        mkdir -p data/test
+        # Download sample datasets for testing
+        python scripts/download_test_data.py
+
+    - name: Validate model performance
+      run: |
+        python src/training/evaluate.py --test-data data/test/ --min-accuracy 0.85
+
+    - name: Load test API
+      run: |
+        # Start the API in background
+        python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 &
+        sleep 30
+        
+        # Run load tests
+        pip install locust
+        locust -f tests/load_test.py --host=http://localhost:8000 --users 10 --spawn-rate 2 -t 60s --headless
+        
+        # Kill background process
+        pkill -f uvicorn
+
+  # Build and push Docker image
+  build-and-push:
+    runs-on: ubuntu-latest
+    needs: [test, model-validation]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: docker/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64,linux/arm64
+
+    - name: Generate SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        output-file: sbom.spdx.json
+
+    - name: Scan image for vulnerabilities
+      uses: aquasecurity/trivy-action@master
+      with:
+        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
+
+  # Model Training Job
+  model-training:
+    runs-on: ubuntu-latest
+    if: github.event.schedule != null || contains(github.event.head_commit.message, '[retrain]')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install mlflow
+
+    - name: Download training data
+      env:
+        DATA_SOURCE_URL: ${{ secrets.DATA_SOURCE_URL }}
+        DATA_ACCESS_TOKEN: ${{ secrets.DATA_ACCESS_TOKEN }}
+      run: |
+        python scripts/download_training_data.py
+
+    - name: Train model
+      env:
+        MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+        MLFLOW_EXPERIMENT_NAME: distillbert-sentiment
+      run: |
+        python src/training/train.py \
+          --data-path data/training/ \
+          --output-path models/ \
+          --experiment-name $MLFLOW_EXPERIMENT_NAME \
+          --model-name distillbert-base-uncased \
+          --epochs 3 \
+          --batch-size 16 \
+          --learning-rate 2e-5
+
+    - name: Evaluate model
+      run: |
+        python src/training/evaluate.py \
+          --model-path models/latest \
+          --test-data data/test/ \
+          --output-path evaluation_results.json
+
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model-${{ github.sha }}
+        path: |
+          models/
+          evaluation_results.json
+        retention-days: 30
+
+    - name: Model validation gate
+      run: |
+        python scripts/validate_model_performance.py \
+          --results evaluation_results.json \
+          --min-accuracy 0.90 \
+          --min-f1 0.88
+
+  # Deploy to staging
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    if: github.ref == 'refs/heads/main'
+    environment: staging
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Deploy to staging
+      env:
+        STAGING_HOST: ${{ secrets.STAGING_HOST }}
+        STAGING_USER: ${{ secrets.STAGING_USER }}
+        STAGING_KEY: ${{ secrets.STAGING_PRIVATE_KEY }}
+      run: |
+        echo "$STAGING_KEY" > staging_key
+        chmod 600 staging_key
+        
+        # Deploy using docker-compose
+        scp -i staging_key -o StrictHostKeyChecking=no docker-compose.yml $STAGING_USER@$STAGING_HOST:~/
+        ssh -i staging_key -o StrictHostKeyChecking=no $STAGING_USER@$STAGING_HOST << 'EOF'
+          docker-compose pull
+          docker-compose up -d --remove-orphans
+          docker system prune -f
+        EOF
+
+    - name: Health check staging
+      run: |
+        sleep 60  # Wait for service to start
+        curl -f http://${{ secrets.STAGING_HOST }}/health || exit 1
+
+    - name: Run smoke tests
+      run: |
+        python tests/smoke_tests.py --host http://${{ secrets.STAGING_HOST }}
+
+  # Deploy to production
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: [deploy-staging]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Blue-Green Deployment
+      env:
+        PROD_HOST: ${{ secrets.PROD_HOST }}
+        PROD_USER: ${{ secrets.PROD_USER }}
+        PROD_KEY: ${{ secrets.PROD_PRIVATE_KEY }}
+      run: |
+        echo "$PROD_KEY" > prod_key
+        chmod 600 prod_key
+        
+        # Blue-Green deployment script
+        ssh -i prod_key -o StrictHostKeyChecking=no $PROD_USER@$PROD_HOST << 'EOF'
+          # Deploy to green environment
+          docker-compose -f docker-compose.green.yml pull
+          docker-compose -f docker-compose.green.yml up -d
+          
+          # Health check green environment
+          sleep 60
+          curl -f http://localhost:8001/health || exit 1
+          
+          # Switch traffic from blue to green
+          ./scripts/switch_traffic.sh green
+          
+          # Clean up old blue environment
+          docker-compose -f docker-compose.blue.yml down
+        EOF
+
+    - name: Production health check
+      run: |
+        sleep 30
+        curl -f http://${{ secrets.PROD_HOST }}/health || exit 1
+
+    - name: Run production tests
+      run: |
+        python tests/production_tests.py --host http://${{ secrets.PROD_HOST }}
+
+    - name: Rollback on failure
+      if: failure()
+      env:
+        PROD_HOST: ${{ secrets.PROD_HOST }}
+        PROD_USER: ${{ secrets.PROD_USER }}
+        PROD_KEY: ${{ secrets.PROD_PRIVATE_KEY }}
+      run: |
+        echo "$PROD_KEY" > prod_key
+        chmod 600 prod_key
+        
+        ssh -i prod_key -o StrictHostKeyChecking=no $PROD_USER@$PROD_HOST << 'EOF'
+          # Rollback to blue environment
+          ./scripts/switch_traffic.sh blue
+          docker-compose -f docker-compose.blue.yml up -d
+          docker-compose -f docker-compose.green.yml down
+        EOF
+
+  # A/B Testing Setup
+  ab-testing-setup:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: contains(github.event.head_commit.message, '[ab-test]')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup A/B test configuration
+      env:
+        AB_TEST_CONFIG: ${{ secrets.AB_TEST_CONFIG }}
+      run: |
+        echo "$AB_TEST_CONFIG" > config/ab_test_config.yaml
+        
+        # Deploy updated configuration
+        python scripts/update_ab_config.py \
+          --config config/ab_test_config.yaml \
+          --host ${{ secrets.PROD_HOST }}
+
+  # Security scanning
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run CodeQL Analysis
+      uses: github/codeql-action/init@v2
+      with:
+        languages: python
+
+    - name: Autobuild
+      uses: github/codeql-action/autobuild@v2
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v2
+
+    - name: Dependency vulnerability scan
+      run: |
+        pip install safety
+        safety check --json --output safety-report.json || true
+
+    - name: SAST with Semgrep
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: auto
+
+  # Performance monitoring
+  performance-monitoring:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Lighthouse CI
+      uses: treosh/lighthouse-ci-action@v9
+      with:
+        urls: |
+          http://${{ secrets.PROD_HOST }}/docs
+        uploadArtifacts: true
+        temporaryPublicStorage: true
+
+    - name: Load testing with k6
+      run: |
+        docker run --rm -v $PWD/tests:/tests grafana/k6 run /tests/load_test.js \
+          --env HOST=${{ secrets.PROD_HOST }}
+
+  # Cleanup
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+
+    steps:
+    - name: Clean up old artifacts
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+          });
+          
+          // Delete artifacts older than 30 days
+          const thirtyDaysAgo = new Date();
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+          
+          for (const artifact of artifacts.artifacts) {
+            if (new Date(artifact.created_at) < thirtyDaysAgo) {
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+              });
+            }
+          }
+
+    - name: Prune Docker images
+      if: github.ref == 'refs/heads/main'
+      env:
+        REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Keep only latest 5 versions
+        python scripts/cleanup_registry.py \
+          --registry ${{ env.REGISTRY }} \
+          --image ${{ env.IMAGE_NAME }} \
+          --keep 5

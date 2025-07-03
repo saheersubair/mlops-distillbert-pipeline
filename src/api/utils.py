@@ -26,7 +26,6 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-
 class ModelManager:
     """Manages DistillBERT model loading, caching, and inference"""
 
@@ -332,14 +331,12 @@ class ModelManager:
 # Global model manager instance
 _model_manager = None
 
-
 def get_model_manager() -> ModelManager:
     """Get or create global model manager instance"""
     global _model_manager
     if _model_manager is None:
         _model_manager = ModelManager()
     return _model_manager
-
 
 # Utility functions for A/B testing
 class ABTestManager:
@@ -387,7 +384,6 @@ class ABTestManager:
         # In production, this would write to a metrics store
         logger.info(f"A/B Test Result: user={user_id}, version={version}, outcome={outcome}")
 
-
 # Feature store simulation
 class FeatureStore:
     """Simulated feature store for ML features"""
@@ -416,8 +412,16 @@ class FeatureStore:
             if feature_name in self.features:
                 feature_data = self.features[feature_name]
                 if isinstance(feature_data, dict):
-                    result[feature_name] = [feature_data.get(entity_id, None) for entity_id in entity_ids]
+                    # Check if this looks like entity-specific data (has entity keys)
+                    sample_keys = list(feature_data.keys())
+                    if sample_keys and any(key.startswith('user_') for key in sample_keys):
+                        # This is entity-specific feature data
+                        result[feature_name] = [feature_data.get(entity_id, None) for entity_id in entity_ids]
+                    else:
+                        # This is a scalar/global feature stored as dict
+                        result[feature_name] = [feature_data] * len(entity_ids)
                 else:
+                    # This is a simple scalar value
                     result[feature_name] = [feature_data] * len(entity_ids)
             else:
                 result[feature_name] = [None] * len(entity_ids)
@@ -434,11 +438,9 @@ class FeatureStore:
         else:
             self.features[feature_name] = {entity_id: value}
 
-
 # Global instances
 _ab_test_manager = None
 _feature_store = None
-
 
 def get_ab_test_manager() -> ABTestManager:
     """Get or create global A/B test manager"""
@@ -446,7 +448,6 @@ def get_ab_test_manager() -> ABTestManager:
     if _ab_test_manager is None:
         _ab_test_manager = ABTestManager()
     return _ab_test_manager
-
 
 def get_feature_store() -> FeatureStore:
     """Get or create global feature store"""
