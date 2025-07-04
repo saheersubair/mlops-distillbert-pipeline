@@ -424,50 +424,7 @@ docker run -p 8000:8000 mlops-distillbert:latest
 docker-compose up -d
 ```
 
-### Kubernetes Deployment
 
-```bash
-# Create namespace
-kubectl create namespace mlops
-
-# Apply manifests
-kubectl apply -f k8s/ -n mlops
-
-# Check deployment
-kubectl get all -n mlops
-
-# Scale deployment
-kubectl scale deployment mlops-api --replicas=5 -n mlops
-```
-
-### Cloud Deployment
-
-#### AWS EKS
-```bash
-# Create EKS cluster
-eksctl create cluster --name mlops-cluster --region us-west-2
-
-# Deploy application
-kubectl apply -f k8s/
-```
-
-#### Google Cloud GKE
-```bash
-# Create GKE cluster
-gcloud container clusters create mlops-cluster --zone us-central1-a
-
-# Deploy application
-kubectl apply -f k8s/
-```
-
-#### Azure AKS
-```bash
-# Create AKS cluster
-az aks create --resource-group mlops-rg --name mlops-cluster
-
-# Deploy application
-kubectl apply -f k8s/
-```
 
 ### Production Considerations
 
