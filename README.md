@@ -681,28 +681,6 @@ bandit -r src/
 safety check
 ```
 
-### Pre-commit Hooks
-
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/psf/black
-    rev: 22.3.0
-    hooks:
-      - id: black
-
-  - repo: https://github.com/pycqa/flake8
-    rev: 4.0.1
-    hooks:
-      - id: flake8
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.950
-    hooks:
-      - id: mypy
-```
-
-
 ## 📚 Documentation
 
 ### API Documentation
