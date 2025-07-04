@@ -1,0 +1,742 @@
+name: Model Training Pipeline
+
+on:
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/training/**'
+      - 'data/**'
+      - 'config/model_config.yaml'
+
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/training/**'
+      - 'data/**'
+      - 'config/model_config.yaml'
+
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'Model name to train'
+        required: false
+        default: 'distilbert-base-uncased'
+        type: string
+
+      epochs:
+        description: 'Number of training epochs'
+        required: false
+        default: '3'
+        type: string
+
+      batch_size:
+        description: 'Training batch size'
+        required: false
+        default: '16'
+        type: string
+
+      learning_rate:
+        description: 'Learning rate'
+        required: false
+        default: '2e-5'
+        type: string
+
+      force_retrain:
+        description: 'Force retraining even if no data changes'
+        required: false
+        default: false
+        type: boolean
+
+      experiment_name:
+        description: 'MLflow experiment name'
+        required: false
+        default: 'distillbert-sentiment-auto'
+        type: string
+
+env:
+  PYTHON_VERSION: '3.9'
+  CUDA_VERSION: '11.8'
+  MLFLOW_TRACKING_URI: ${{ secrets.MLFLOW_TRACKING_URI }}
+  WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+  HF_TOKEN: ${{ secrets.HF_TOKEN }}
+
+jobs:
+  # Check if training is needed
+  check-training-trigger:
+    runs-on: ubuntu-latest
+    outputs:
+      should_train: ${{ steps.check.outputs.should_train }}
+      data_hash: ${{ steps.check.outputs.data_hash }}
+      last_model_hash: ${{ steps.check.outputs.last_model_hash }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Get full history for comparison
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install requests hashlib gitpython
+
+    - name: Check training trigger
+      id: check
+      run: |
+        python - <<EOF
+        import os
+        import hashlib
+        import json
+        import requests
+        from pathlib import Path
+        
+        def calculate_data_hash():
+            """Calculate hash of training data"""
+            data_files = []
+            for pattern in ['data/**/*.csv', 'data/**/*.json', 'data/**/*.jsonl']:
+                data_files.extend(Path('.').glob(pattern))
+            
+            if not data_files:
+                return "no_data"
+            
+            hasher = hashlib.sha256()
+            for file_path in sorted(data_files):
+                if file_path.exists():
+                    with open(file_path, 'rb') as f:
+                        hasher.update(f.read())
+            
+            return hasher.hexdigest()[:16]
+        
+        def get_last_model_hash():
+            """Get hash of last trained model from GitHub releases"""
+            try:
+                repo = "${{ github.repository }}"
+                url = f"https://api.github.com/repos/{repo}/releases/latest"
+                headers = {"Authorization": "token ${{ secrets.GITHUB_TOKEN }}"}
+                
+                response = requests.get(url, headers=headers)
+                if response.status_code == 200:
+                    release = response.json()
+                    return release.get('tag_name', 'no_model')
+                return "no_model"
+            except:
+                return "no_model"
+        
+        # Calculate current data hash
+        current_data_hash = calculate_data_hash()
+        print(f"Current data hash: {current_data_hash}")
+        
+        # Get last model hash
+        last_model_hash = get_last_model_hash()
+        print(f"Last model hash: {last_model_hash}")
+        
+        # Check if training is needed
+        should_train = (
+            "${{ github.event.inputs.force_retrain }}" == "true" or
+            current_data_hash != last_model_hash or
+            "${{ github.event_name }}" == "schedule" or
+            "${{ github.event_name }}" == "workflow_dispatch"
+        )
+        
+        print(f"Should train: {should_train}")
+        
+        # Set outputs
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"should_train={str(should_train).lower()}\n")
+            f.write(f"data_hash={current_data_hash}\n")
+            f.write(f"last_model_hash={last_model_hash}\n")
+        EOF
+
+  # Prepare training environment
+  setup-training:
+    runs-on: ubuntu-latest
+    needs: check-training-trigger
+    if: needs.check-training-trigger.outputs.should_train == 'true'
+
+    outputs:
+      runner_type: ${{ steps.setup.outputs.runner_type }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Determine runner type
+      id: setup
+      run: |
+        # Use GPU runner if available, otherwise CPU
+        if [ "${{ secrets.USE_GPU_RUNNER }}" = "true" ]; then
+          echo "runner_type=gpu" >> $GITHUB_OUTPUT
+        else
+          echo "runner_type=cpu" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check training data availability
+      run: |
+        if [ ! -d "data" ] || [ -z "$(ls -A data/ 2>/dev/null)" ]; then
+          echo "No training data found. Creating sample data..."
+          mkdir -p data
+          python -c "
+        import pandas as pd
+        import numpy as np
+        
+        # Create sample sentiment data
+        np.random.seed(42)
+        
+        positive_texts = [
+            'I love this product!', 'Amazing quality and fast delivery',
+            'Great experience, highly recommended', 'Fantastic service',
+            'Excellent value for money', 'Outstanding performance',
+            'Perfect solution for my needs', 'Incredible results',
+            'Superb customer support', 'Highly satisfied with purchase'
+        ]
+        
+        negative_texts = [
+            'Terrible product, waste of money', 'Very disappointed with quality',
+            'Poor customer service', 'Not worth the price',
+            'Completely unsatisfied', 'Worst purchase ever',
+            'Defective item received', 'Misleading description',
+            'Rude staff and poor service', 'Would not recommend'
+        ]
+        
+        # Generate dataset
+        texts = positive_texts * 200 + negative_texts * 200
+        labels = [1] * 2000 + [0] * 2000
+        
+        # Add some neutral examples
+        neutral_texts = ['It is okay', 'Average product', 'Nothing special', 'Mediocre quality'] * 100
+        texts.extend(neutral_texts)
+        labels.extend([1] * 200 + [0] * 200)  # Mix of positive and negative labels
+        
+        # Shuffle
+        indices = np.random.permutation(len(texts))
+        texts = [texts[i] for i in indices]
+        labels = [labels[i] for i in indices]
+        
+        # Split data
+        total = len(texts)
+        train_size = int(0.7 * total)
+        val_size = int(0.15 * total)
+        
+        splits = {
+            'train': (0, train_size),
+            'validation': (train_size, train_size + val_size),
+            'test': (train_size + val_size, total)
+        }
+        
+        for split_name, (start, end) in splits.items():
+            df = pd.DataFrame({
+                'text': texts[start:end],
+                'label': labels[start:end]
+            })
+            df.to_csv(f'data/{split_name}.csv', index=False)
+        
+        print(f'Created sample dataset with {total} samples')
+        "
+        fi
+
+  # Train model on CPU
+  train-model-cpu:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, setup-training]
+    if: needs.check-training-trigger.outputs.should_train == 'true' && needs.setup-training.outputs.runner_type == 'cpu'
+
+    strategy:
+      matrix:
+        python-version: ['3.9']
+        model-config:
+          - name: 'distilbert-base-uncased'
+            epochs: 3
+            batch_size: 16
+            learning_rate: '2e-5'
+          - name: 'distilbert-base-uncased-finetuned-sst-2-english'
+            epochs: 2
+            batch_size: 32
+            learning_rate: '1e-5'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-training-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-training-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        pip install -r requirements.txt
+        pip install wandb mlflow
+
+    - name: Set up MLflow
+      run: |
+        export MLFLOW_TRACKING_URI=${{ env.MLFLOW_TRACKING_URI }}
+        if [ -z "$MLFLOW_TRACKING_URI" ]; then
+          echo "Starting local MLflow server..."
+          mlflow server --host 0.0.0.0 --port 5000 &
+          export MLFLOW_TRACKING_URI=http://localhost:5000
+          sleep 10
+        fi
+
+    - name: Download training data
+      if: github.event_name == 'schedule' || github.event.inputs.force_retrain == 'true'
+      run: |
+        # Download fresh training data if URL is provided
+        if [ -n "${{ secrets.TRAINING_DATA_URL }}" ]; then
+          echo "Downloading training data..."
+          curl -H "Authorization: Bearer ${{ secrets.DATA_ACCESS_TOKEN }}" \
+               -o data/fresh_training_data.zip \
+               "${{ secrets.TRAINING_DATA_URL }}"
+          unzip -o data/fresh_training_data.zip -d data/
+          rm data/fresh_training_data.zip
+        fi
+
+    - name: Train model
+      env:
+        WANDB_PROJECT: mlops-distillbert
+        WANDB_API_KEY: ${{ env.WANDB_API_KEY }}
+        MLFLOW_EXPERIMENT_NAME: ${{ github.event.inputs.experiment_name || 'distillbert-sentiment-auto' }}
+      run: |
+        python src/training/train.py \
+          --data-path data/ \
+          --output-path models/trained_model_${{ strategy.job-index }} \
+          --model-name ${{ matrix.model-config.name }} \
+          --epochs ${{ github.event.inputs.epochs || matrix.model-config.epochs }} \
+          --batch-size ${{ github.event.inputs.batch_size || matrix.model-config.batch_size }} \
+          --learning-rate ${{ github.event.inputs.learning_rate || matrix.model-config.learning_rate }} \
+          --experiment-name ${{ env.MLFLOW_EXPERIMENT_NAME }}
+
+    - name: Evaluate model
+      run: |
+        python src/training/evaluate.py \
+          --model-path models/trained_model_${{ strategy.job-index }} \
+          --test-data data/test.csv \
+          --output-path evaluation_results_${{ strategy.job-index }} \
+          --min-accuracy 0.80 \
+          --min-f1 0.75 \
+          --visualize \
+          --mlflow-uri ${{ env.MLFLOW_TRACKING_URI }} \
+          --experiment-name evaluation-${{ env.MLFLOW_EXPERIMENT_NAME }}
+
+    - name: Upload model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model-${{ matrix.model-config.name }}-${{ needs.check-training-trigger.outputs.data_hash }}
+        path: |
+          models/trained_model_${{ strategy.job-index }}/
+          evaluation_results_${{ strategy.job-index }}/
+        retention-days: 30
+
+    - name: Save training metadata
+      run: |
+        cat > training_metadata_${{ strategy.job-index }}.json <<EOF
+        {
+          "model_name": "${{ matrix.model-config.name }}",
+          "epochs": ${{ github.event.inputs.epochs || matrix.model-config.epochs }},
+          "batch_size": ${{ github.event.inputs.batch_size || matrix.model-config.batch_size }},
+          "learning_rate": "${{ github.event.inputs.learning_rate || matrix.model-config.learning_rate }}",
+          "data_hash": "${{ needs.check-training-trigger.outputs.data_hash }}",
+          "training_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "commit_sha": "${{ github.sha }}",
+          "runner": "cpu"
+        }
+        EOF
+
+    - name: Upload training metadata
+      uses: actions/upload-artifact@v3
+      with:
+        name: training-metadata-${{ strategy.job-index }}
+        path: training_metadata_${{ strategy.job-index }}.json
+
+  # Train model on GPU (if available)
+  train-model-gpu:
+    runs-on: [self-hosted, gpu]
+    needs: [check-training-trigger, setup-training]
+    if: needs.check-training-trigger.outputs.should_train == 'true' && needs.setup-training.outputs.runner_type == 'gpu'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Setup CUDA
+      run: |
+        nvidia-smi
+        python -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+        pip install -r requirements.txt
+        pip install wandb mlflow accelerate
+
+    - name: Train model with GPU acceleration
+      env:
+        WANDB_PROJECT: mlops-distillbert-gpu
+        WANDB_API_KEY: ${{ env.WANDB_API_KEY }}
+        CUDA_VISIBLE_DEVICES: 0
+      run: |
+        python src/training/train.py \
+          --data-path data/ \
+          --output-path models/trained_model_gpu \
+          --model-name ${{ github.event.inputs.model_name || 'distilbert-base-uncased' }} \
+          --epochs ${{ github.event.inputs.epochs || '3' }} \
+          --batch-size ${{ github.event.inputs.batch_size || '32' }} \
+          --learning-rate ${{ github.event.inputs.learning_rate || '2e-5' }} \
+          --experiment-name ${{ github.event.inputs.experiment_name || 'distillbert-sentiment-gpu' }}
+
+    - name: Evaluate model
+      run: |
+        python src/training/evaluate.py \
+          --model-path models/trained_model_gpu \
+          --test-data data/test.csv \
+          --output-path evaluation_results_gpu \
+          --min-accuracy 0.85 \
+          --min-f1 0.80 \
+          --visualize
+
+    - name: Upload GPU model artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: trained-model-gpu-${{ needs.check-training-trigger.outputs.data_hash }}
+        path: |
+          models/trained_model_gpu/
+          evaluation_results_gpu/
+        retention-days: 30
+
+  # Model selection and comparison
+  select-best-model:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, train-model-cpu]
+    if: always() && needs.check-training-trigger.outputs.should_train == 'true'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all model artifacts
+      uses: actions/download-artifact@v3
+      with:
+        path: artifacts/
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas numpy json5
+
+    - name: Select best model
+      run: |
+        python - <<EOF
+        import json
+        import os
+        from pathlib import Path
+        
+        def load_evaluation_results(artifact_path):
+            """Load evaluation results from artifact"""
+            results_file = Path(artifact_path) / "evaluation_results.json"
+            if results_file.exists():
+                with open(results_file, 'r') as f:
+                    return json.load(f)
+            return None
+        
+        # Find all evaluation results
+        artifacts_dir = Path("artifacts")
+        best_model = None
+        best_score = 0
+        
+        for artifact_dir in artifacts_dir.iterdir():
+            if artifact_dir.is_dir() and "trained-model" in artifact_dir.name:
+                # Look for evaluation results
+                for eval_dir in artifact_dir.iterdir():
+                    if eval_dir.is_dir() and "evaluation_results" in eval_dir.name:
+                        results = load_evaluation_results(eval_dir)
+                        if results:
+                            # Use F1 score as primary metric
+                            score = results.get('basic_metrics', {}).get('f1_weighted', 0)
+                            print(f"Model {artifact_dir.name}: F1 = {score:.4f}")
+                            
+                            if score > best_score:
+                                best_score = score
+                                best_model = artifact_dir.name
+        
+        print(f"Best model: {best_model} with F1 score: {best_score:.4f}")
+        
+        # Save best model info
+        with open("best_model_info.json", "w") as f:
+            json.dump({
+                "best_model": best_model,
+                "best_score": best_score,
+                "selection_timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }, f, indent=2)
+        
+        # Set output for next jobs
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"best_model={best_model}\n")
+            f.write(f"best_score={best_score}\n")
+        EOF
+      id: select
+
+    - name: Upload best model info
+      uses: actions/upload-artifact@v3
+      with:
+        name: best-model-info
+        path: best_model_info.json
+
+    outputs:
+      best_model: ${{ steps.select.outputs.best_model }}
+      best_score: ${{ steps.select.outputs.best_score }}
+
+  # Create model release
+  create-model-release:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, select-best-model]
+    if: always() && needs.check-training-trigger.outputs.should_train == 'true' && needs.select-best-model.outputs.best_model != ''
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download best model
+      uses: actions/download-artifact@v3
+      with:
+        name: ${{ needs.select-best-model.outputs.best_model }}
+        path: best_model/
+
+    - name: Download best model info
+      uses: actions/download-artifact@v3
+      with:
+        name: best-model-info
+        path: ./
+
+    - name: Prepare release assets
+      run: |
+        # Create release directory
+        mkdir -p release/
+        
+        # Copy model files
+        cp -r best_model/* release/
+        
+        # Create model card
+        cat > release/MODEL_CARD.md <<EOF
+        # DistillBERT Sentiment Analysis Model
+        
+        ## Model Information
+        - **Model Name**: DistillBERT Sentiment Analysis
+        - **Version**: ${{ needs.check-training-trigger.outputs.data_hash }}
+        - **Training Date**: $(date -u +%Y-%m-%d)
+        - **F1 Score**: ${{ needs.select-best-model.outputs.best_score }}
+        
+        ## Training Details
+        - **Architecture**: DistillBERT
+        - **Task**: Binary Sentiment Classification
+        - **Dataset Hash**: ${{ needs.check-training-trigger.outputs.data_hash }}
+        - **Training Commit**: ${{ github.sha }}
+        
+        ## Performance Metrics
+        - **F1 Score**: ${{ needs.select-best-model.outputs.best_score }}
+        - **Evaluation Date**: $(date -u +%Y-%m-%d)
+        
+        ## Usage
+        \`\`\`python
+        from transformers import pipeline
+        
+        classifier = pipeline("sentiment-analysis", model="./model")
+        result = classifier("I love this product!")
+        print(result)
+        \`\`\`
+        
+        ## Files
+        - \`pytorch_model.bin\` - Model weights
+        - \`config.json\` - Model configuration  
+        - \`tokenizer.json\` - Tokenizer configuration
+        - \`evaluation_results.json\` - Detailed evaluation results
+        EOF
+        
+        # Create archive
+        tar -czf release/distillbert-sentiment-${{ needs.check-training-trigger.outputs.data_hash }}.tar.gz -C release .
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: model-${{ needs.check-training-trigger.outputs.data_hash }}
+        name: DistillBERT Model ${{ needs.check-training-trigger.outputs.data_hash }}
+        body: |
+          ## New DistillBERT Model Release
+          
+          **Performance**: F1 Score = ${{ needs.select-best-model.outputs.best_score }}
+          
+          **Changes**:
+          - Data hash: ${{ needs.check-training-trigger.outputs.data_hash }}
+          - Training commit: ${{ github.sha }}
+          - Best model: ${{ needs.select-best-model.outputs.best_model }}
+          
+          **Files**:
+          - Complete model archive
+          - Evaluation results
+          - Model card with usage instructions
+          
+          This model was automatically trained and selected based on performance metrics.
+        files: |
+          release/distillbert-sentiment-${{ needs.check-training-trigger.outputs.data_hash }}.tar.gz
+          release/MODEL_CARD.md
+          best_model_info.json
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Update model registry
+  update-model-registry:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, select-best-model, create-model-release]
+    if: always() && needs.check-training-trigger.outputs.should_train == 'true' && needs.select-best-model.outputs.best_model != ''
+
+    steps:
+    - name: Update MLflow Model Registry
+      if: env.MLFLOW_TRACKING_URI != ''
+      run: |
+        python - <<EOF
+        import mlflow
+        import mlflow.pytorch
+        from mlflow.tracking import MlflowClient
+        
+        # Setup MLflow
+        mlflow.set_tracking_uri("${{ env.MLFLOW_TRACKING_URI }}")
+        client = MlflowClient()
+        
+        # Register model
+        model_name = "distillbert-sentiment-production"
+        model_version = client.create_model_version(
+            name=model_name,
+            source="models:/distillbert-sentiment-production/latest",
+            description=f"Auto-trained model with F1 score: ${{ needs.select-best-model.outputs.best_score }}"
+        )
+        
+        # Transition to production if score is good enough
+        if float("${{ needs.select-best-model.outputs.best_score }}") >= 0.85:
+            client.transition_model_version_stage(
+                name=model_name,
+                version=model_version.version,
+                stage="Production"
+            )
+        
+        print(f"Model registered: {model_name} version {model_version.version}")
+        EOF
+
+    - name: Update model registry file
+      run: |
+        # Update local model registry
+        cat > model_registry.json <<EOF
+        {
+          "latest_model": {
+            "version": "${{ needs.check-training-trigger.outputs.data_hash }}",
+            "f1_score": ${{ needs.select-best-model.outputs.best_score }},
+            "training_date": "$(date -u +%Y-%m-%d)",
+            "commit_sha": "${{ github.sha }}",
+            "release_tag": "model-${{ needs.check-training-trigger.outputs.data_hash }}",
+            "best_model_artifact": "${{ needs.select-best-model.outputs.best_model }}"
+          }
+        }
+        EOF
+        
+        # Commit updated registry
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add model_registry.json
+        git commit -m "Update model registry with new model ${{ needs.check-training-trigger.outputs.data_hash }}" || exit 0
+        git push
+
+  # Trigger deployment
+  trigger-deployment:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, select-best-model, create-model-release]
+    if: always() && needs.check-training-trigger.outputs.should_train == 'true' && needs.select-best-model.outputs.best_model != '' && needs.select-best-model.outputs.best_score >= 0.85
+
+    steps:
+    - name: Trigger deployment workflow
+      uses: peter-evans/repository-dispatch@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        event-type: new-model-available
+        client-payload: |
+          {
+            "model_version": "${{ needs.check-training-trigger.outputs.data_hash }}",
+            "f1_score": ${{ needs.select-best-model.outputs.best_score }},
+            "release_tag": "model-${{ needs.check-training-trigger.outputs.data_hash }}"
+          }
+
+  # Cleanup
+  cleanup:
+    runs-on: ubuntu-latest
+    needs: [check-training-trigger, select-best-model, create-model-release]
+    if: always() && needs.check-training-trigger.outputs.should_train == 'true'
+
+    steps:
+    - name: Clean up old artifacts
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+          });
+          
+          // Keep only the latest 5 training artifacts
+          const trainingArtifacts = artifacts.artifacts
+            .filter(artifact => artifact.name.includes('trained-model'))
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+            .slice(5);
+          
+          for (const artifact of trainingArtifacts) {
+            await github.rest.actions.deleteArtifact({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              artifact_id: artifact.id,
+            });
+          }
+
+    - name: Report training summary
+      run: |
+        echo "## Training Summary" >> $GITHUB_STEP_SUMMARY
+        echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Data Hash**: ${{ needs.check-training-trigger.outputs.data_hash }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Best Model**: ${{ needs.select-best-model.outputs.best_model }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Best Score**: ${{ needs.select-best-model.outputs.best_score }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Training Date**: $(date -u +%Y-%m-%d)" >> $GITHUB_STEP_SUMMARY
+        
+        if [ "${{ needs.select-best-model.outputs.best_score }}" != "" ]; then
+          if (( $(echo "${{ needs.select-best-model.outputs.best_score }} >= 0.85" | bc -l) )); then
+            echo "- **Status**: ✅ Model meets quality threshold" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- **Status**: ⚠️ Model below quality threshold" >> $GITHUB_STEP_SUMMARY
+          fi
+        fi

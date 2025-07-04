@@ -1,0 +1,540 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "MLOps DistillBERT Pipeline Dashboard",
+    "tags": ["mlops", "distillbert", "api", "monitoring"],
+    "style": "dark",
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "API Overview",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "rate(mlops_prediction_requests_total[5m])",
+            "refId": "A",
+            "legendFormat": "Requests/sec"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "displayMode": "basic",
+              "orientation": "horizontal"
+            },
+            "mappings": [],
+            "thresholds": {
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            }
+          }
+        },
+        "options": {
+          "orientation": "auto",
+          "reduceOptions": {
+            "values": false,
+            "calcs": ["lastNotNull"],
+            "fields": ""
+          },
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "none",
+          "justifyMode": "auto"
+        },
+        "pluginVersion": "8.0.0",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Request Rate",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mlops_prediction_requests_total[5m])",
+            "refId": "A",
+            "legendFormat": "Total Requests/sec"
+          },
+          {
+            "expr": "rate(mlops_prediction_requests_total{status=\"success\"}[5m])",
+            "refId": "B",
+            "legendFormat": "Successful Requests/sec"
+          },
+          {
+            "expr": "rate(mlops_prediction_requests_total{status=\"error\"}[5m])",
+            "refId": "C",
+            "legendFormat": "Error Requests/sec"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Requests/sec",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Response Time",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(mlops_prediction_latency_seconds_bucket[5m]))",
+            "refId": "A",
+            "legendFormat": "50th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.90, rate(mlops_prediction_latency_seconds_bucket[5m]))",
+            "refId": "B",
+            "legendFormat": "90th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(mlops_prediction_latency_seconds_bucket[5m]))",
+            "refId": "C",
+            "legendFormat": "95th percentile"
+          },
+          {
+            "expr": "histogram_quantile(0.99, rate(mlops_prediction_latency_seconds_bucket[5m]))",
+            "refId": "D",
+            "legendFormat": "99th percentile"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Seconds",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Error Rate",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "rate(mlops_prediction_requests_total{status=\"error\"}[5m]) / rate(mlops_prediction_requests_total[5m])",
+            "refId": "A"
+          }
+        ],
+        "valueName": "current",
+        "format": "percentunit",
+        "thresholds": "0.01,0.05",
+        "colorBackground": true,
+        "colors": ["rgba(50, 172, 45, 0.97)", "rgba(237, 129, 40, 0.89)", "rgba(245, 54, 54, 0.9)"],
+        "sparkline": {
+          "show": true,
+          "full": false,
+          "lineColor": "rgb(31, 120, 193)",
+          "fillColor": "rgba(31, 118, 189, 0.18)"
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "Model Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mlops_model_accuracy",
+            "refId": "A",
+            "legendFormat": "Accuracy"
+          },
+          {
+            "expr": "mlops_model_confidence{quantile=\"0.5\"}",
+            "refId": "B",
+            "legendFormat": "Median Confidence"
+          },
+          {
+            "expr": "mlops_model_confidence{quantile=\"0.9\"}",
+            "refId": "C",
+            "legendFormat": "90th Percentile Confidence"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Score",
+            "min": 0,
+            "max": 1,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "System Resources",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mlops_cpu_usage_percent",
+            "refId": "A",
+            "legendFormat": "CPU Usage %"
+          },
+          {
+            "expr": "mlops_memory_usage_bytes / 1024 / 1024 / 1024",
+            "refId": "B",
+            "legendFormat": "Memory Usage GB"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Usage",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 16
+        }
+      },
+      {
+        "id": 7,
+        "title": "Cache Performance",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(mlops_cache_hits_total[5m])",
+            "refId": "A",
+            "legendFormat": "Cache Hits/sec"
+          },
+          {
+            "expr": "rate(mlops_cache_misses_total[5m])",
+            "refId": "B",
+            "legendFormat": "Cache Misses/sec"
+          },
+          {
+            "expr": "rate(mlops_cache_hits_total[5m]) / (rate(mlops_cache_hits_total[5m]) + rate(mlops_cache_misses_total[5m]))",
+            "refId": "C",
+            "legendFormat": "Hit Rate"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Rate",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 24
+        }
+      },
+      {
+        "id": 8,
+        "title": "Batch Processing",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, rate(mlops_batch_size_bucket[5m]))",
+            "refId": "A",
+            "legendFormat": "Median Batch Size"
+          },
+          {
+            "expr": "histogram_quantile(0.95, rate(mlops_batch_size_bucket[5m]))",
+            "refId": "B",
+            "legendFormat": "95th Percentile Batch Size"
+          },
+          {
+            "expr": "rate(mlops_prediction_requests_total{endpoint=\"batch\"}[5m])",
+            "refId": "C",
+            "legendFormat": "Batch Requests/sec"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Count",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 24
+        }
+      },
+      {
+        "id": 9,
+        "title": "Model Drift Detection",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "mlops_model_drift_score{metric_type=\"accuracy\"}",
+            "refId": "A",
+            "legendFormat": "Accuracy Drift"
+          },
+          {
+            "expr": "mlops_model_drift_score{metric_type=\"confidence\"}",
+            "refId": "B",
+            "legendFormat": "Confidence Drift"
+          },
+          {
+            "expr": "mlops_model_drift_score{metric_type=\"prediction_distribution\"}",
+            "refId": "C",
+            "legendFormat": "Prediction Distribution Drift"
+          }
+        ],
+        "xAxis": {
+          "mode": "time",
+          "show": true
+        },
+        "yAxes": [
+          {
+            "label": "Drift Score",
+            "min": 0,
+            "show": true
+          }
+        ],
+        "lines": true,
+        "fill": 1,
+        "linewidth": 2,
+        "points": false,
+        "pointradius": 2,
+        "legend": {
+          "show": true,
+          "values": true,
+          "current": true,
+          "max": true,
+          "min": false,
+          "total": false,
+          "avg": true
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 32
+        }
+      },
+      {
+        "id": 10,
+        "title": "A/B Testing Results",
+        "type": "table",
+        "targets": [
+          {
+            "expr": "mlops_ab_test_requests_total",
+            "refId": "A",
+            "format": "table"
+          }
+        ],
+        "transformations": [
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "__name__": true,
+                "Time": true
+              },
+              "indexByName": {},
+              "renameByName": {
+                "experiment_id": "Experiment",
+                "variant": "Variant",
+                "outcome": "Outcome",
+                "Value": "Requests"
+              }
+            }
+          }
+        ],
+        "pluginVersion": "8.0.0",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 32
+        }
+      }
+    ],
+    "templating": {
+      "list": [
+        {
+          "name": "model_version",
+          "type": "query",
+          "query": "label_values(mlops_prediction_requests_total, model_version)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        },
+        {
+          "name": "endpoint",
+          "type": "query",
+          "query": "label_values(mlops_prediction_requests_total, endpoint)",
+          "refresh": 1,
+          "includeAll": true,
+          "multi": true
+        }
+      ]
+    },
+    "annotations": {
+      "list": [
+        {
+          "name": "Deployments",
+          "datasource": "prometheus",
+          "enable": true,
+          "expr": "changes(mlops_model_info[1h])",
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "tagKeys": "model_version"
+        }
+      ]
+    }
+  }
+}

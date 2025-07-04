@@ -1,0 +1,490 @@
+# API Configuration for MLOps DistillBERT Service
+# This file contains all configuration settings for the FastAPI application
+
+# API Server Configuration
+api:
+  # Server settings
+  host: "0.0.0.0"
+  port: 8000
+  workers: 4
+  reload: false  # Set to true for development
+  debug: false
+
+  # Request/Response settings
+  max_request_size: 10485760  # 10MB
+  request_timeout: 30  # seconds
+  keepalive_timeout: 5  # seconds
+
+  # CORS settings
+  cors:
+    allow_origins: ["*"]  # Restrict in production
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+    allow_credentials: true
+    max_age: 86400  # 24 hours
+
+  # Rate limiting
+  rate_limit:
+    enabled: true
+    requests_per_minute: 100
+    requests_per_hour: 1000
+    burst_size: 10
+
+  # Security settings
+  security:
+    api_key_required: false  # Set to true in production
+    allowed_ips: []  # Empty means allow all
+    block_suspicious_requests: true
+    max_content_length: 1048576  # 1MB
+
+  # Response settings
+  response:
+    include_request_id: true
+    include_processing_time: true
+    include_version: true
+    pretty_json: false  # Set to true for debugging
+
+# Logging Configuration
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+  # File logging
+  file:
+    enabled: true
+    path: "logs/api.log"
+    max_size: 10485760  # 10MB
+    backup_count: 5
+    rotation: "daily"
+
+  # Console logging
+  console:
+    enabled: true
+    colored: true
+
+  # Structured logging
+  structured:
+    enabled: true
+    format: "json"
+    include_trace_id: true
+
+  # Log sampling (for high traffic)
+  sampling:
+    enabled: false
+    rate: 0.1  # Sample 10% of requests
+
+  # Sensitive data filtering
+  filter_sensitive_data: true
+  sensitive_fields: ["password", "token", "api_key", "secret"]
+
+# Monitoring Configuration
+monitoring:
+  # Prometheus metrics
+  prometheus:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    include_labels: true
+
+  # Health checks
+  health_check:
+    enabled: true
+    path: "/health"
+    include_dependencies: true
+    timeout: 5  # seconds
+
+  # Performance monitoring
+  performance:
+    enabled: true
+    track_request_duration: true
+    track_memory_usage: true
+    track_cpu_usage: true
+    sample_rate: 1.0  # Track 100% of requests
+
+  # Alerting
+  alerts:
+    enabled: true
+    error_rate_threshold: 0.05  # 5%
+    latency_threshold: 2.0  # seconds
+    memory_threshold: 0.8  # 80%
+    cpu_threshold: 0.8  # 80%
+
+  # Application Performance Monitoring (APM)
+  apm:
+    enabled: false
+    service_name: "mlops-distillbert-api"
+    environment: "production"
+
+# Caching Configuration
+cache:
+  # Prediction caching
+  prediction:
+    enabled: true
+    backend: "memory"  # memory, redis, memcached
+    ttl: 3600  # 1 hour
+    max_size: 1000
+
+  # Model caching
+  model:
+    enabled: true
+    cache_dir: "/app/models"
+    auto_cleanup: true
+    cleanup_interval: 86400  # 24 hours
+
+  # Response caching
+  response:
+    enabled: false
+    ttl: 300  # 5 minutes
+    vary_headers: ["Accept-Encoding", "User-Agent"]
+
+# Database Configuration (if using database)
+database:
+  # Connection settings
+  url: null  # Set via environment variable
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  pool_recycle: 3600
+
+  # Migration settings
+  auto_migrate: false
+  migration_timeout: 300
+
+  # Backup settings
+  backup:
+    enabled: false
+    interval: 86400  # 24 hours
+    retention_days: 30
+
+# Redis Configuration (if using Redis)
+redis:
+  url: null  # Set via environment variable
+  password: null
+  db: 0
+  connection_pool:
+    max_connections: 20
+    retry_on_timeout: true
+
+  # Sentinel configuration (for high availability)
+  sentinel:
+    enabled: false
+    service_name: "mymaster"
+    hosts: []
+
+# Model Configuration
+model:
+  # Default model settings
+  default_model: "distilbert-base-uncased-finetuned-sst-2-english"
+  model_cache_dir: "/app/models"
+
+  # Model loading
+  auto_load: true
+  load_timeout: 120  # seconds
+  warmup_requests: 10
+
+  # Model versioning
+  versioning:
+    enabled: true
+    version_strategy: "hash"  # hash, timestamp, semantic
+
+  # Model registry
+  registry:
+    enabled: true
+    backend: "file"  # file, mlflow, custom
+    registry_path: "/app/models/registry.json"
+
+  # A/B testing
+  ab_testing:
+    enabled: false
+    default_split: 100  # 100% to control
+
+# Prediction Configuration
+prediction:
+  # Request validation
+  validation:
+    max_text_length: 512
+    min_text_length: 1
+    allowed_languages: []  # Empty means all languages
+
+  # Batch processing
+  batch:
+    enabled: true
+    max_batch_size: 100
+    batch_timeout: 30  # seconds
+
+  # Preprocessing
+  preprocessing:
+    enabled: true
+    clean_text: true
+    normalize_unicode: true
+    remove_html: true
+
+  # Postprocessing
+  postprocessing:
+    enabled: true
+    round_confidence: 4  # decimal places
+    include_raw_scores: false
+
+  # Confidence thresholds
+  confidence:
+    low_threshold: 0.5
+    high_threshold: 0.9
+    reject_threshold: 0.3  # Reject predictions below this
+
+# Feature Store Configuration
+feature_store:
+  enabled: false
+  backend: "file"  # file, feast, custom
+  cache_features: true
+  feature_ttl: 3600  # 1 hour
+
+  # Feature serving
+  serving:
+    enabled: false
+    endpoint: "/features"
+    batch_size: 1000
+
+# Experiment Configuration
+experiments:
+  # A/B testing
+  ab_testing:
+    enabled: false
+    config_file: "config/ab_test_config.yaml"
+
+  # Feature flags
+  feature_flags:
+    enabled: false
+    provider: "file"  # file, launchdarkly, custom
+    config_file: "config/feature_flags.yaml"
+
+  # Canary deployments
+  canary:
+    enabled: false
+    traffic_percentage: 5
+    success_rate_threshold: 0.99
+
+# Security Configuration
+security:
+  # Authentication
+  authentication:
+    enabled: false
+    method: "api_key"  # api_key, jwt, oauth2
+    header_name: "X-API-Key"
+
+  # Authorization
+  authorization:
+    enabled: false
+    roles: ["admin", "user", "readonly"]
+
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    strategy: "sliding_window"  # fixed_window, sliding_window
+    redis_url: null  # Required for distributed rate limiting
+
+  # Request validation
+  request_validation:
+    enabled: true
+    max_payload_size: 1048576  # 1MB
+    block_malicious_patterns: true
+
+  # Response security
+  response_security:
+    remove_server_header: true
+    add_security_headers: true
+    content_security_policy: "default-src 'self'"
+
+# Development Configuration
+development:
+  # Debug settings
+  debug: false
+  auto_reload: false
+  hot_reload: false
+
+  # Testing
+  testing:
+    enabled: false
+    mock_model: false
+    test_data_path: "data/test"
+
+  # Profiling
+  profiling:
+    enabled: false
+    profiler: "py-spy"  # py-spy, cProfile
+    output_dir: "profiling"
+
+# Production Configuration
+production:
+  # Performance tuning
+  performance:
+    optimize_imports: true
+    precompile_models: true
+    use_jit: false
+
+  # Scaling
+  scaling:
+    auto_scale: false
+    min_workers: 2
+    max_workers: 8
+    target_cpu_utilization: 70
+
+  # Reliability
+  reliability:
+    circuit_breaker: true
+    retry_attempts: 3
+    retry_delay: 1.0
+    timeout: 30.0
+
+  # Resource limits
+  resources:
+    memory_limit: "2Gi"
+    cpu_limit: "1000m"
+    disk_limit: "10Gi"
+
+# Environment-specific overrides
+environments:
+  development:
+    api:
+      debug: true
+      reload: true
+    logging:
+      level: "DEBUG"
+      console:
+        colored: true
+    monitoring:
+      performance:
+        sample_rate: 0.1
+
+  staging:
+    api:
+      workers: 2
+    logging:
+      level: "INFO"
+    monitoring:
+      alerts:
+        enabled: true
+
+  production:
+    api:
+      workers: 4
+      cors:
+        allow_origins: ["https://yourdomain.com"]
+    logging:
+      level: "WARNING"
+      file:
+        enabled: true
+    monitoring:
+      prometheus:
+        enabled: true
+      alerts:
+        enabled: true
+    security:
+      authentication:
+        enabled: true
+      rate_limiting:
+        enabled: true
+
+# Integration Configuration
+integrations:
+  # MLflow
+  mlflow:
+    enabled: false
+    tracking_uri: null
+    experiment_name: "distillbert-inference"
+
+  # Weights & Biases
+  wandb:
+    enabled: false
+    project: "mlops-distillbert"
+    entity: null
+
+  # Sentry (Error tracking)
+  sentry:
+    enabled: false
+    dsn: null
+    environment: "production"
+
+  # DataDog (Monitoring)
+  datadog:
+    enabled: false
+    api_key: null
+    service_name: "mlops-distillbert-api"
+
+  # Slack (Notifications)
+  slack:
+    enabled: false
+    webhook_url: null
+    channel: "#mlops-alerts"
+
+  # Email (Notifications)
+  email:
+    enabled: false
+    smtp_server: null
+    smtp_port: 587
+    username: null
+    password: null
+    from_address: "mlops@yourdomain.com"
+    to_addresses: []
+
+# Backup and Recovery
+backup:
+  enabled: false
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retention_days: 30
+  storage_backend: "s3"  # s3, gcs, azure, local
+
+  # S3 configuration
+  s3:
+    bucket: null
+    region: "us-east-1"
+    access_key_id: null
+    secret_access_key: null
+
+# Compliance and Governance
+compliance:
+  # Data privacy
+  data_privacy:
+    enabled: false
+    anonymize_logs: true
+    data_retention_days: 90
+
+  # Audit logging
+  audit:
+    enabled: false
+    log_requests: true
+    log_responses: false
+    audit_log_path: "logs/audit.log"
+
+  # Model governance
+  model_governance:
+    enabled: false
+    require_approval: false
+    track_model_lineage: true
+
+# Custom Extensions
+extensions:
+  # Custom middleware
+  middleware: []
+
+  # Custom routes
+  routes: []
+
+  # Custom plugins
+  plugins: []
+
+  # Custom validators
+  validators: []
+
+# Version and Metadata
+version: "1.0.0"
+build_info:
+  build_date: null
+  commit_hash: null
+  branch: null
+
+metadata:
+  service_name: "mlops-distillbert-api"
+  description: "Production-ready API for DistillBERT sentiment analysis"
+  maintainer: "MLOps Team"
+  documentation_url: "https://github.com/saheersubair/mlops-distillbert-pipeline"
+  support_email: "zaheerzubair05@gmail.com"

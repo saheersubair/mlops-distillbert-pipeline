@@ -30,3 +30,16 @@
 2025-07-04 00:04:58,276 - src.api.utils - INFO - Model loaded successfully in 2.25 seconds
 2025-07-04 00:04:58,277 - main - WARNING - Custom metrics module not available
 2025-07-04 00:04:58,277 - main - INFO - API startup complete
+2025-07-04 00:15:03,368 - main - INFO - Shutting down API...
+2025-07-04 00:15:10,263 - main - INFO - Starting MLOps DistillBERT API...
+2025-07-04 00:15:10,263 - src.api.utils - WARNING - Config file config/model_config.yaml not found, using defaults
+2025-07-04 00:15:10,263 - src.api.utils - INFO - Loading DistillBERT model version v1.0.0...
+2025-07-04 00:15:12,371 - src.api.utils - INFO - Model loaded successfully in 2.11 seconds
+2025-07-04 00:15:12,371 - main - WARNING - Custom metrics module not available
+2025-07-04 00:15:12,371 - main - INFO - API startup complete
+2025-07-04 00:16:00,330 - main - INFO - {'event': 'prediction', 'text_preview': 'test', 'prediction': 'NEGATIVE', 'confidence': 0.960575520992279, 'latency': 0.04822969436645508, 'model_version': None, 'timestamp': '2025-07-03T18:46:00.330178'}
+2025-07-04 00:16:29,279 - main - INFO - {'event': 'prediction', 'text_preview': "I love this product! It's amazing!", 'prediction': 'POSITIVE', 'confidence': 0.9998871088027954, 'latency': 0.02485203742980957, 'model_version': None, 'timestamp': '2025-07-03T18:46:29.279610'}
+2025-07-04 00:16:33,422 - main - INFO - {'event': 'prediction', 'text_preview': 'This is terrible. I hate it.', 'prediction': 'NEGATIVE', 'confidence': 0.9996533393859863, 'latency': 0.02147650718688965, 'model_version': None, 'timestamp': '2025-07-03T18:46:33.422030'}
+2025-07-04 00:16:37,575 - main - INFO - {'event': 'prediction', 'text_preview': 'The weather is okay today.', 'prediction': 'POSITIVE', 'confidence': 0.9997705817222595, 'latency': 0.026357173919677734, 'model_version': None, 'timestamp': '2025-07-03T18:46:37.575393'}
+2025-07-04 00:16:41,788 - main - INFO - {'event': 'batch_prediction', 'batch_size': 5, 'avg_confidence': 0.3988200619292911, 'latency': 0.09034132957458496, 'model_version': None, 'timestamp': '2025-07-03T18:46:41.788442'}
+2025-07-04 00:53:26,016 - main - INFO - Shutting down API...

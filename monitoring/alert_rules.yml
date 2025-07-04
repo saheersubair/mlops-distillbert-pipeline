@@ -1,0 +1,178 @@
+# Prometheus Alert Rules for MLOps Pipeline
+# Path: monitoring/alert_rules.yml
+
+groups:
+  - name: mlops_api_alerts
+    rules:
+      # High error rate alert
+      - alert: HighErrorRate
+        expr: rate(mlops_prediction_requests_total{status="error"}[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: mlops-api
+        annotations:
+          summary: "High error rate detected in MLOps API"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # High response time alert
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(mlops_prediction_latency_seconds_bucket[5m])) > 2.0
+        for: 3m
+        labels:
+          severity: warning
+          service: mlops-api
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s"
+
+      # Low request rate (possible service issue)
+      - alert: LowRequestRate
+        expr: rate(mlops_prediction_requests_total[5m]) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: mlops-api
+        annotations:
+          summary: "Low request rate detected"
+          description: "Request rate is {{ $value }} requests/second"
+
+      # API service down
+      - alert: APIServiceDown
+        expr: up{job="mlops-api"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          service: mlops-api
+        annotations:
+          summary: "MLOps API service is down"
+          description: "The MLOps API service has been down for more than 30 seconds"
+
+  - name: mlops_model_alerts
+    rules:
+      # Model accuracy drop
+      - alert: ModelAccuracyDrop
+        expr: mlops_model_accuracy < 0.85
+        for: 5m
+        labels:
+          severity: warning
+          service: mlops-model
+        annotations:
+          summary: "Model accuracy below threshold"
+          description: "Model accuracy is {{ $value | humanizePercentage }} (threshold: 85%)"
+
+      # Low model confidence
+      - alert: LowModelConfidence
+        expr: mlops_model_confidence{quantile="0.5"} < 0.7
+        for: 10m
+        labels:
+          severity: warning
+          service: mlops-model
+        annotations:
+          summary: "Low model confidence detected"
+          description: "Median model confidence is {{ $value | humanizePercentage }}"
+
+      # High model prediction variance
+      - alert: HighPredictionVariance
+        expr: stddev_over_time(mlops_model_confidence{quantile="0.5"}[1h]) > 0.2
+        for: 15m
+        labels:
+          severity: warning
+          service: mlops-model
+        annotations:
+          summary: "High prediction variance detected"
+          description: "Model prediction confidence variance is {{ $value }}"
+
+  - name: mlops_system_alerts
+    rules:
+      # High CPU usage
+      - alert: HighCPUUsage
+        expr: mlops_cpu_usage_percent > 80
+        for: 5m
+        labels:
+          severity: warning
+          service: mlops-system
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value }}%"
+
+      # High memory usage
+      - alert: HighMemoryUsage
+        expr: (mlops_memory_usage_bytes / 1024 / 1024 / 1024) > 4
+        for: 5m
+        labels:
+          severity: warning
+          service: mlops-system
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value }}GB"
+
+      # Low disk space
+      - alert: LowDiskSpace
+        expr: (mlops_disk_usage_bytes{path="/"} / 1024 / 1024 / 1024) > 8
+        for: 5m
+        labels:
+          severity: critical
+          service: mlops-system
+        annotations:
+          summary: "Low disk space detected"
+          description: "Disk usage is {{ $value }}GB"
+
+  - name: mlops_business_alerts
+    rules:
+      # Low conversion rate
+      - alert: LowConversionRate
+        expr: rate(mlops_business_conversions_total[1h]) < 0.1
+        for: 30m
+        labels:
+          severity: warning
+          service: mlops-business
+        annotations:
+          summary: "Low conversion rate detected"
+          description: "Conversion rate is {{ $value | humanizePercentage }} for the last hour"
+
+      # High cache miss rate
+      - alert: HighCacheMissRate
+        expr: rate(mlops_cache_misses_total[5m]) / rate(mlops_cache_requests_total[5m]) > 0.3
+        for: 10m
+        labels:
+          severity: warning
+          service: mlops-cache
+        annotations:
+          summary: "High cache miss rate detected"
+          description: "Cache miss rate is {{ $value | humanizePercentage }}"
+
+  - name: mlops_infrastructure_alerts
+    rules:
+      # Container restart
+      - alert: ContainerRestart
+        expr: increase(kube_pod_container_status_restarts_total[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: mlops-infrastructure
+        annotations:
+          summary: "Container restart detected"
+          description: "Container {{ $labels.container }} in pod {{ $labels.pod }} has restarted"
+
+      # Pod not ready
+      - alert: PodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: mlops-infrastructure
+        annotations:
+          summary: "Pod not ready"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} is not ready"
+
+      # Deployment rollout stuck
+      - alert: DeploymentRolloutStuck
+        expr: kube_deployment_status_replicas_unavailable > 0
+        for: 15m
+        labels:
+          severity: critical
+          service: mlops-infrastructure
+        annotations:
+          summary: "Deployment rollout stuck"
+          description: "Deployment {{ $labels.deployment }} has {{ $value }} unavailable replicas"

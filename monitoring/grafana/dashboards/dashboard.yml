@@ -1,0 +1,35 @@
+# Grafana Dashboard Provisioning Configuration
+# Path: monitoring/grafana/dashboards/dashboard.yml
+
+apiVersion: 1
+
+providers:
+  - name: 'MLOps Dashboards'
+    orgId: 1
+    folder: 'MLOps'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+
+  - name: 'System Dashboards'
+    orgId: 1
+    folder: 'System'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/system
+
+  - name: 'Business Dashboards'
+    orgId: 1
+    folder: 'Business'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/business

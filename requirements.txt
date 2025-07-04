@@ -15,3 +15,4 @@ datasets
 mlflow
 wandb
 pytest-asyncio
+seaborn
